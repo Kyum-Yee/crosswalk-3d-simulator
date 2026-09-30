@@ -1,0 +1,2748 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D 무한 도시 횡단보도 & 도로 횡단 게임 (휠체어/보행자 체력 & 차량 회피)</title>
+  <!-- Three.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-glass: rgba(15, 23, 42, 0.82);
+      --bg-glass-card: rgba(30, 41, 59, 0.85);
+      --border-glass: rgba(255, 255, 255, 0.14);
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --accent-wheelchair: #8b5cf6;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --success: #10b981;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #0b0f19;
+      color: var(--text-main);
+    }
+
+    #webgl-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* ─── 노인 모드 시야 저하 (백내장/노안 뿌연 시야 필터) ─── */
+    #elderly-blur-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9;
+      opacity: 0;
+      backdrop-filter: blur(3.2px) contrast(0.86) brightness(1.04);
+      -webkit-backdrop-filter: blur(3.2px) contrast(0.86) brightness(1.04);
+      background: radial-gradient(circle at center, rgba(254, 243, 199, 0.1) 0%, rgba(217, 119, 6, 0.22) 75%, rgba(180, 83, 9, 0.36) 100%);
+      transition: opacity 0.4s ease;
+    }
+
+    #elderly-blur-overlay.active {
+      opacity: 1;
+    }
+
+    /* ─── 시각장애인 모드 (암막 상태 + 유저 반경 3m 실루엣 강조) ─── */
+    #blind-silhouette-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9;
+      opacity: 0;
+      background: radial-gradient(circle at center, rgba(0, 0, 0, 0.05) 0%, rgba(0, 0, 0, 0.45) 45%, rgba(0, 0, 0, 0.92) 75%, #000000 100%);
+      transition: opacity 0.4s ease;
+    }
+
+    #blind-silhouette-overlay.active {
+      opacity: 1;
+    }
+
+    /* ─── HUD 중앙 크로스헤어 ─── */
+    #reticle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 0 8px rgba(0, 0, 0, 0.8), 0 0 6px var(--primary);
+      pointer-events: none;
+      z-index: 10;
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+
+    #reticle.active {
+      transform: translate(-50%, -50%) scale(1.8);
+      background: var(--warning);
+      box-shadow: 0 0 12px var(--warning);
+    }
+
+    /* ─── 상단 상태 배너 & 스코어보드 ─── */
+    #hud-top {
+      position: absolute;
+      top: 18px;
+      left: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 20;
+      pointer-events: none;
+    }
+
+    .badge-bar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: var(--bg-glass);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--border-glass);
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: -0.2px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    }
+
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+
+    .badge-wheelchair {
+      border-color: rgba(139, 92, 246, 0.5);
+      color: #c4b5fd;
+    }
+
+    .badge-wheelchair .badge-dot {
+      background: var(--accent-wheelchair);
+      box-shadow: 0 0 8px var(--accent-wheelchair);
+    }
+
+    .badge-elderly {
+      border-color: rgba(245, 158, 11, 0.6);
+      color: #fef08a;
+    }
+
+    .badge-elderly .badge-dot {
+      background: #f59e0b;
+      box-shadow: 0 0 8px #f59e0b;
+    }
+
+    .badge-blind {
+      border-color: rgba(14, 165, 233, 0.6);
+      color: #7dd3fc;
+    }
+
+    .badge-blind .badge-dot {
+      background: #0ea5e9;
+      box-shadow: 0 0 8px #0ea5e9;
+    }
+
+    /* ─── 실시간 체력 (Stamina) HUD 게이지 바 ─── */
+    #stamina-container {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 220px;
+      background: var(--bg-glass);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--border-glass);
+      padding: 8px 14px;
+      border-radius: 14px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    }
+
+    .stamina-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .stamina-bar-bg {
+      width: 100%;
+      height: 9px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 5px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #stamina-bar-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #10b981, #34d399);
+      border-radius: 5px;
+      transition: width 0.15s ease, background 0.3s ease;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+    }
+
+    #stamina-bar-fill.warning {
+      background: linear-gradient(90deg, #f59e0b, #fbbf24);
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+    }
+
+    #stamina-bar-fill.danger {
+      background: linear-gradient(90deg, #ef4444, #f87171);
+      box-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
+      animation: pulse-stamina 0.6s infinite alternate;
+    }
+
+    @keyframes pulse-stamina {
+      from { opacity: 0.6; }
+      to { opacity: 1; }
+    }
+
+    /* ─── 단차 접근 경고 배너 ─── */
+    #warning-toast {
+      position: absolute;
+      top: 90px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-30px);
+      background: rgba(245, 158, 11, 0.95);
+      backdrop-filter: blur(14px);
+      color: #78350f;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: 800;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 12px 30px rgba(245, 158, 11, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.3);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 50;
+    }
+
+    #warning-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      animation: pulse-warning 0.9s infinite alternate;
+    }
+
+    @keyframes pulse-warning {
+      from { transform: translateX(-50%) translateY(0) scale(1); }
+      to { transform: translateX(-50%) translateY(0) scale(1.03); }
+    }
+
+    /* ─── 이동 불가 알림 ─── */
+    #blocked-toast {
+      position: absolute;
+      top: 150px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-30px);
+      background: rgba(239, 68, 68, 0.95);
+      backdrop-filter: blur(14px);
+      color: #ffffff;
+      padding: 14px 28px;
+      border-radius: 14px;
+      font-weight: 800;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 12px 30px rgba(239, 68, 68, 0.6);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 55;
+      text-align: center;
+    }
+
+    #blocked-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      animation: shake-error 0.4s ease;
+    }
+
+    /* ─── 단차 극복 체력 급감 알림 ─── */
+    #drain-toast {
+      position: absolute;
+      top: 150px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-30px);
+      background: rgba(185, 28, 28, 0.96);
+      backdrop-filter: blur(14px);
+      color: #ffffff;
+      padding: 14px 28px;
+      border-radius: 14px;
+      font-weight: 800;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 14px 32px rgba(185, 28, 28, 0.7);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 57;
+      text-align: center;
+    }
+
+    #drain-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      animation: shake-error 0.5s ease;
+    }
+
+    /* ─── 교통사고 충돌 알림 ─── */
+    #crash-toast {
+      position: absolute;
+      top: 215px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-30px);
+      background: rgba(220, 38, 38, 0.98);
+      backdrop-filter: blur(16px);
+      color: #ffffff;
+      padding: 16px 32px;
+      border-radius: 16px;
+      font-weight: 900;
+      font-size: 17px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 16px 40px rgba(220, 38, 38, 0.8);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 60;
+    }
+
+    #crash-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      animation: shake-error 0.4s ease;
+    }
+
+    /* ─── 시각장애인 점자블록 감지 토스트 ─── */
+    #tactile-toast {
+      position: absolute;
+      top: 135px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-20px);
+      background: rgba(15, 23, 42, 0.94);
+      border: 1px solid rgba(250, 204, 21, 0.6);
+      border-radius: 12px;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 700;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 56;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6), 0 0 16px rgba(250, 204, 21, 0.35);
+    }
+
+    #tactile-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ─── 무단횡단 구간 안내 토스트 ─── */
+    #zone-toast {
+      position: absolute;
+      bottom: 95px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--bg-glass);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--border-glass);
+      color: #f8fafc;
+      padding: 10px 22px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      z-index: 45;
+    }
+
+    #zone-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-5px);
+    }
+
+    @keyframes shake-error {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      20%, 60% { transform: translateX(calc(-50% - 8px)) translateY(0); }
+      40%, 80% { transform: translateX(calc(-50% + 8px)) translateY(0); }
+    }
+
+    /* ─── 위험 화면 테두리 플래시 ─── */
+    #danger-vignette {
+      position: absolute;
+      inset: 0;
+      box-shadow: inset 0 0 60px rgba(239, 68, 68, 0);
+      pointer-events: none;
+      z-index: 15;
+      transition: box-shadow 0.2s ease;
+    }
+
+    #danger-vignette.active {
+      box-shadow: inset 0 0 90px rgba(239, 68, 68, 0.7);
+    }
+
+    /* ─── 조작 안내 오버레이 (좌하단) ─── */
+    #controls-guide {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background: var(--bg-glass);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--border-glass);
+      border-radius: 14px;
+      padding: 12px 16px;
+      font-size: 12px;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      pointer-events: auto;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      max-width: 320px;
+    }
+
+    .key-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .key-cap {
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      padding: 2px 6px;
+      border-radius: 5px;
+      font-weight: 700;
+      font-size: 11px;
+      color: #fff;
+      box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
+    }
+
+    /* ─── 오른쪽 컨트롤 패널 ─── */
+    #panel-container {
+      position: absolute;
+      top: 18px;
+      right: 20px;
+      width: 340px;
+      max-height: calc(100vh - 36px);
+      overflow-y: auto;
+      background: var(--bg-glass);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid var(--border-glass);
+      border-radius: 20px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+    }
+
+    #panel-container::-webkit-scrollbar {
+      width: 5px;
+    }
+    #panel-container::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+    }
+
+    .panel-header {
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--border-glass);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .panel-title {
+      font-size: 15px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #ffffff;
+    }
+
+    .panel-body {
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .mode-selector {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+      background: rgba(0, 0, 0, 0.35);
+      padding: 6px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .mode-btn {
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-muted);
+      padding: 8px 6px;
+      border-radius: 8px;
+      font-size: 11.5px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .mode-btn:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .mode-btn.active-pedestrian {
+      background: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+    }
+
+    .mode-btn.active-wheelchair {
+      background: var(--accent-wheelchair);
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(139, 92, 246, 0.45);
+    }
+
+    .mode-btn.active-elderly {
+      background: #d97706;
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(217, 119, 6, 0.5);
+    }
+
+    .mode-btn.active-blind {
+      background: #0284c7;
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(2, 132, 199, 0.55);
+    }
+
+    .control-item {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .control-label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .control-val {
+      font-family: monospace;
+      font-size: 12px;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .slider-input {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.18);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .slider-input::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #ffffff;
+      cursor: pointer;
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+      transition: transform 0.1s ease, background 0.2s ease;
+    }
+
+    .slider-input::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+      background: var(--primary);
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .toggle-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .toggle-title {
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .toggle-desc {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(255, 255, 255, 0.2);
+      transition: .3s cubic-bezier(0.16, 1, 0.3, 1);
+      border-radius: 22px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s cubic-bezier(0.16, 1, 0.3, 1);
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: var(--primary);
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(18px);
+    }
+
+    .signal-btn-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+
+    .signal-btn {
+      padding: 6px 4px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-glass);
+      border-radius: 8px;
+      color: var(--text-main);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .signal-btn.active {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: #fff;
+    }
+
+    .action-btn {
+      width: 100%;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-glass);
+      border-radius: 10px;
+      color: #fff;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .action-btn:hover {
+      background: rgba(255, 255, 255, 0.16);
+      transform: translateY(-1px);
+    }
+
+    #start-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(11, 15, 25, 0.7);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      cursor: pointer;
+      transition: opacity 0.3s ease;
+    }
+
+    .start-card {
+      background: var(--bg-glass-card);
+      border: 1px solid var(--border-glass);
+      border-radius: 24px;
+      padding: 36px 40px;
+      text-align: center;
+      max-width: 480px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+    }
+
+    .start-title {
+      font-size: 24px;
+      font-weight: 900;
+      margin-bottom: 8px;
+      color: #fff;
+      letter-spacing: -0.5px;
+    }
+
+    .start-desc {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .start-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--primary);
+      color: #fff;
+      padding: 14px 28px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 15px;
+      box-shadow: 0 10px 25px rgba(59, 130, 246, 0.5);
+      transition: transform 0.2s, background 0.2s;
+    }
+
+    .start-cta:hover {
+      transform: scale(1.03);
+      background: var(--primary-hover);
+    }
+
+    #panel-toggle-btn {
+      position: absolute;
+      top: 18px;
+      right: 20px;
+      background: var(--bg-glass);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-glass);
+      color: #fff;
+      padding: 9px 14px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      z-index: 25;
+      display: none;
+      align-items: center;
+      gap: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- WebGL Canvas -->
+  <canvas id="webgl-canvas"></canvas>
+
+  <!-- 노인 모드 시야 저하 (백내장/노안 뿌연 시야 필터) 오버레이 -->
+  <div id="elderly-blur-overlay"></div>
+
+  <!-- 시각장애인 모드 (암막 상태 + 유저 반경 3m 실루엣 강조) 오버레이 -->
+  <div id="blind-silhouette-overlay"></div>
+
+  <!-- 중앙 조준점 Reticle -->
+  <div id="reticle"></div>
+
+  <!-- 위험 화면 테두리 플래시 -->
+  <div id="danger-vignette"></div>
+
+  <!-- 상단 상태 배너 & 스코어 & 체력 바 -->
+  <div id="hud-top">
+    <div class="badge-bar">
+      <div id="mode-badge" class="badge">
+        <span class="badge-dot"></span>
+        <span id="mode-badge-text">일반 보행자 모드 (시점 1.65m)</span>
+      </div>
+      <div class="badge">
+        <span style="color: #38bdf8;">🏃 진행거리:</span>
+        <span id="dist-display" style="font-family: monospace; font-weight: 800; color: #fff;">0 m</span>
+      </div>
+      <div class="badge">
+        <span style="color: #4ade80;">🚸 건넌 횡단보도:</span>
+        <span id="crosswalk-count-display" style="font-family: monospace; font-weight: 800; color: #fff;">0개</span>
+      </div>
+      <div class="badge">
+        <span style="color: #f59e0b;">🚗 무단횡단 성공:</span>
+        <span id="jaywalk-count-display" style="font-family: monospace; font-weight: 800; color: #fff;">0회</span>
+      </div>
+      <div class="badge">
+        <span style="color: #94a3b8;">FPS:</span>
+        <span id="fps-counter" style="font-family: monospace;">60</span>
+      </div>
+    </div>
+
+    <!-- 체력(Stamina) 게이지 -->
+    <div id="stamina-container">
+      <div class="stamina-header">
+        <span id="stamina-label">⚡ 체력 (Stamina)</span>
+        <span id="stamina-text" style="font-family: monospace; color: #10b981;">100%</span>
+      </div>
+      <div class="stamina-bar-bg">
+        <div id="stamina-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 단차 접근 경고 팝업 -->
+  <div id="warning-toast">
+    <span style="font-size: 20px;">⚠️</span>
+    <div>
+      <div>10cm 보도 단차 접근 감지!</div>
+      <div style="font-size: 11px; font-weight: 500; opacity: 0.9;">휠체어 이동 시 추락 및 전도 위험이 있습니다.</div>
+    </div>
+  </div>
+
+  <!-- 이동 불가 경고 팝업 -->
+  <div id="blocked-toast">
+    <span style="font-size: 22px;">🚫</span>
+    <div>
+      <div>이동 불가: 10cm 단차 및 차도 진입 차단</div>
+      <div style="font-size: 11px; font-weight: 500; opacity: 0.9;">휠체어 모드에서는 단차 극복이 불가능하며 차도 무단 진입이 차단됩니다.</div>
+    </div>
+  </div>
+
+  <!-- 단차 극복 체력 급감 알림 -->
+  <div id="drain-toast">
+    <span style="font-size: 24px;">⚡💥</span>
+    <div>
+      <div>10cm 단차 극복! 체력 극심하게 감소 (-50%)</div>
+      <div style="font-size: 11px; font-weight: 500; opacity: 0.9;">휠체어로 10cm 턱을 오르내리느라 팔과 상체 근육이 급격히 지쳤습니다!</div>
+    </div>
+  </div>
+
+  <!-- 교통사고 충돌 팝업 -->
+  <div id="crash-toast">
+    <span style="font-size: 24px;">💥</span>
+    <div>
+      <div>차량 충돌 발생! (안전지대로 후퇴)</div>
+      <div style="font-size: 12px; font-weight: 500; opacity: 0.9;">달려오는 사륜차 및 배달 오토바이에 부딪혔습니다.</div>
+    </div>
+  </div>
+
+  <!-- 점자블록 감지 토스트 (시각장애인 모드) -->
+  <div id="tactile-toast">
+    <span style="font-size: 22px;">🟡</span>
+    <div>
+      <div style="color: #facc15; font-weight: 800;">점자블록 (Braille Block) 감지</div>
+      <div style="font-size: 11px; font-weight: 500; opacity: 0.9;">보행 안전 유도 점자 감지 (지팡이 타격음 변화)</div>
+    </div>
+  </div>
+
+  <!-- 무단횡단 / 횡단보도 구간 안내 토스트 -->
+  <div id="zone-toast">
+    <span id="zone-icon">⚠️</span>
+    <span id="zone-text">무단횡단 구간 진입! 횡단보도가 없습니다. 차량을 피해 조심해서 건너세요!</span>
+  </div>
+
+  <!-- 좌하단 조작 가이드 -->
+  <div id="controls-guide">
+    <div style="font-weight: 800; font-size: 12px; color: #fff; margin-bottom: 1px;">🎮 키보드 조작 안내</div>
+    <div class="key-row">
+      <span class="key-cap">W</span><span class="key-cap">A</span><span class="key-cap">S</span><span class="key-cap">D</span>
+      <span style="color: var(--text-muted);">또는</span>
+      <span class="key-cap">↑</span><span class="key-cap">←</span><span class="key-cap">↓</span><span class="key-cap">→</span>
+      <span style="color: var(--text-muted);">1인칭 이동 (앞으로 전진)</span>
+    </div>
+    <div class="key-row">
+      <span class="key-cap">Shift</span>
+      <span style="color: var(--text-muted);">전력 질주/빠른 주행 (체력 소모 빠름)</span>
+    </div>
+    <div class="key-row">
+      <span class="key-cap">C</span>
+      <span style="color: var(--text-muted);">보행자 / 휠체어 / 노인 모드 순환 전환</span>
+    </div>
+    <div class="key-row">
+      <span class="key-cap">R</span>
+      <span style="color: var(--text-muted);">게임 시작 위치로 리셋</span>
+    </div>
+    <div class="key-row">
+      <span class="key-cap">ESC</span>
+      <span style="color: var(--text-muted);">마우스 커서 해제</span>
+    </div>
+  </div>
+
+  <!-- 오른쪽 컨트롤 패널 -->
+  <div id="panel-container">
+    <div class="panel-header">
+      <div class="panel-title">
+        <span>🚦</span> 3D 무한 횡단보도 시뮬레이터
+      </div>
+      <button id="minimize-btn" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px;" title="패널 숨기기">✕</button>
+    </div>
+
+    <div class="panel-body">
+      <!-- 1. 이동 모드 선택 -->
+      <div>
+        <div class="section-label">👤 이동 모드 설정 (체력 & 속도 & 시야 차등)</div>
+        <div class="mode-selector">
+          <button id="btn-mode-pedestrian" class="mode-btn active-pedestrian">
+            <span>🚶</span> 일반 보행자
+          </button>
+          <button id="btn-mode-wheelchair" class="mode-btn">
+            <span>♿</span> 휠체어 사용자
+          </button>
+          <button id="btn-mode-elderly" class="mode-btn">
+            <span>👴</span> 고령자(노인)
+          </button>
+          <button id="btn-mode-blind" class="mode-btn">
+            <span>🦯</span> 시각장애인
+          </button>
+        </div>
+      </div>
+
+      <!-- 2. 슬라이더 제어 (높이, 기본속도, 흔들림, 차량 밀도) -->
+      <div>
+        <div class="section-label">⚙️ 시점 & 이동 역학 제어</div>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <!-- 카메라 높이 -->
+          <div class="control-item">
+            <div class="control-label-row">
+              <span>카메라 높이 (시점)</span>
+              <span id="label-camera-height" class="control-val">1.65m</span>
+            </div>
+            <input type="range" id="slider-camera-height" class="slider-input" min="0.8" max="2.2" step="0.05" value="1.65">
+          </div>
+
+          <!-- 이동 속도 -->
+          <div class="control-item">
+            <div class="control-label-row">
+              <span>기본 이동 속도</span>
+              <span id="label-move-speed" class="control-val">3.6 m/s</span>
+            </div>
+            <input type="range" id="slider-move-speed" class="slider-input" min="1.5" max="8.0" step="0.2" value="3.6">
+          </div>
+
+          <!-- 화면 흔들림 강도 -->
+          <div class="control-item">
+            <div class="control-label-row">
+              <span>화면 흔들림 강도</span>
+              <span id="label-shake-intensity" class="control-val">50%</span>
+            </div>
+            <input type="range" id="slider-shake-intensity" class="slider-input" min="0" max="100" step="5" value="50">
+          </div>
+
+          <!-- 차량 통행 밀도 -->
+          <div class="control-item">
+            <div class="control-label-row">
+              <span>차량 통행량 (난이도)</span>
+              <span id="label-traffic-density" class="control-val">보통</span>
+            </div>
+            <input type="range" id="slider-traffic-density" class="slider-input" min="1" max="3" step="1" value="2">
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. 환경 요소 토글 -->
+      <div>
+        <div class="section-label">🚏 환경 및 장애물 설정</div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <!-- 점자블록 토글 -->
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <span class="toggle-title">점자블록 (Braille Block)</span>
+              <span class="toggle-desc">보도 유도/점형 블록 표시</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="toggle-tactile" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <!-- 단차 및 장애물 토글 -->
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <span class="toggle-title">10cm 단차 & 장애물</span>
+              <span class="toggle-desc">보도 턱 및 볼라드·콘 배치</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="toggle-obstacles" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <!-- 경고음 사운드 토글 -->
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <span class="toggle-title">효과음 & 경고 사운드</span>
+              <span class="toggle-desc">단차 경고음 및 클랙슨 소리</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="toggle-sound" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. 보행 신호등 제어 -->
+      <div>
+        <div class="section-label">🚦 횡단보도 신호 제어</div>
+        <div class="signal-btn-grid">
+          <button id="btn-signal-green" class="signal-btn" style="color: #34d399;">
+            <span>🟢</span> 보행신호
+          </button>
+          <button id="btn-signal-red" class="signal-btn" style="color: #f87171;">
+            <span>🔴</span> 정지신호
+          </button>
+          <button id="btn-signal-auto" class="signal-btn active" style="color: #60a5fa;">
+            <span>🔄</span> 자동순환
+          </button>
+        </div>
+      </div>
+
+      <!-- 5. 액션 버튼 -->
+      <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 2px;">
+        <button id="btn-reset-pos" class="action-btn">
+          <span>🔄</span> 출발 지점으로 초기화 (0m 리셋)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <button id="panel-toggle-btn">⚙️ 컨트롤 패널 열기</button>
+
+  <!-- 초기 화면 시작 클릭 오버레이 -->
+  <div id="start-overlay">
+    <div class="start-card">
+      <div style="font-size: 40px; margin-bottom: 12px;">🏙️🚗🛵♿🚶</div>
+      <div class="start-title">무한 3D 도시 횡단 시뮬레이터</div>
+      <div class="start-desc">
+        앞으로 걸어갈수록 <strong>횡단보도와 차도가 무한 생성</strong>됩니다!<br>
+        • <strong>사륜차 & 이륜차(오토바이)</strong>가 질주하는 도로를 주의하세요.<br>
+        • <strong>체력(Stamina)</strong>이 소진되면 속도가 급격히 저하되므로 휴식이 필요합니다.<br>
+        • <strong>4가지 이동 모드</strong>: 일반 보행자, 휠체어(10cm 단차 극심 체력 소모), 고령자(시야 흐림), 시각장애인(암막·3m 실루엣·흰지팡이/음향신호).<br>
+        • <strong>단축키</strong>: [C] 모드 순환, [R] 리셋, [WASD] 또는 [방향키] 이동.
+      </div>
+      <div class="start-cta">
+        <span>🎮 클릭하여 게임 시작하기</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 메인 시뮬레이션 및 게임 스크립트 -->
+  <script>
+    /* ══════════════════════════════════════════════════════════════════════
+       1. 오디오 엔진 (Web Audio API Synthesizer)
+       ══════════════════════════════════════════════════════════════════════ */
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+        this.lastWarningTime = 0;
+        this.lastBlockedTime = 0;
+        this.lastHornTime = 0;
+        this.lastCrashTime = 0;
+        this.lastAcousticTime = 0;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContext();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      // 10cm 단차 접근 경고 톤
+      playWarningBeep() {
+        if (!this.enabled) return;
+        const now = performance.now();
+        if (now - this.lastWarningTime < 900) return;
+        this.lastWarningTime = now;
+        this.init();
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(659, this.ctx.currentTime + 0.16);
+
+        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.22);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.23);
+      }
+
+      // 이동 불가 충돌 버저
+      playBlockedBuzz() {
+        if (!this.enabled) return;
+        const now = performance.now();
+        if (now - this.lastBlockedTime < 500) return;
+        this.lastBlockedTime = now;
+        this.init();
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(140, this.ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(70, this.ctx.currentTime + 0.2);
+
+        gain.gain.setValueAtTime(0.28, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.22);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.23);
+      }
+
+      // 차량 경적 소리 (Horn Beep!)
+      playCarHorn() {
+        if (!this.enabled) return;
+        const now = performance.now();
+        if (now - this.lastHornTime < 1800) return;
+        this.lastHornTime = now;
+        this.init();
+
+        const osc1 = this.ctx.createOscillator();
+        const osc2 = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc1.type = 'sawtooth';
+        osc2.type = 'triangle';
+        osc1.frequency.setValueAtTime(420, this.ctx.currentTime);
+        osc2.frequency.setValueAtTime(520, this.ctx.currentTime);
+
+        gain.gain.setValueAtTime(0.18, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.45);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc1.start();
+        osc2.start();
+        osc1.stop(this.ctx.currentTime + 0.46);
+        osc2.stop(this.ctx.currentTime + 0.46);
+      }
+
+      // 차량 충돌 소리 (Crash Impact)
+      playCrashSound() {
+        if (!this.enabled) return;
+        const now = performance.now();
+        if (now - this.lastCrashTime < 1000) return;
+        this.lastCrashTime = now;
+        this.init();
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(25, this.ctx.currentTime + 0.4);
+
+        gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.45);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.46);
+      }
+
+      // 발걸음 / 주행 사운드
+      playStepSound(isWheelchair) {
+        if (!this.enabled || !this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        if (isWheelchair) {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(85, this.ctx.currentTime);
+          gain.gain.setValueAtTime(0.03, this.ctx.currentTime);
+          gain.gain.linearRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+        } else {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(110, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(35, this.ctx.currentTime + 0.07);
+          gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+        }
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.1);
+      }
+
+      // 휠체어 10cm 단차 극복 고하중 덜컹거림 사운드
+      playCurbStruggleSound() {
+        if (!this.enabled) return;
+        this.init();
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(90, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.35);
+
+        gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.38);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.4);
+      }
+
+      // 시각장애인 흰지팡이 타격음 (White Cane Tap)
+      playCaneTap(onTactile) {
+        if (!this.enabled || !this.ctx) return;
+        this.init();
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        if (onTactile) {
+          // 점자블록 타격 시: 높은 피치의 맑고 경쾌한 플라스틱/석재 반향음 (1350Hz -> 850Hz)
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(1350, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(850, this.ctx.currentTime + 0.05);
+          gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.06);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.07);
+        } else {
+          // 아스팔트 / 일반 보도 타격 시: 둔탁한 타격음 (520Hz -> 180Hz)
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(520, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(180, this.ctx.currentTime + 0.05);
+          gain.gain.setValueAtTime(0.10, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.06);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.07);
+        }
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+      }
+
+      // 시각장애인용 횡단보도 음향신호기 소리 (Acoustic Pedestrian Signal Chime)
+      playAcousticSignal(isGreen) {
+        if (!this.enabled) return;
+        const now = performance.now();
+        if (now - this.lastAcousticTime < 1400) return;
+        this.lastAcousticTime = now;
+        this.init();
+
+        if (isGreen) {
+          // 녹색 신호일 때: 한국 횡단보도 음향신호기 뻐꾸기/새소리 ("뻐~ 꾹~")
+          const osc1 = this.ctx.createOscillator();
+          const gain1 = this.ctx.createGain();
+          osc1.type = 'sine';
+          osc1.frequency.setValueAtTime(1046.5, this.ctx.currentTime); // C6
+          gain1.gain.setValueAtTime(0.08, this.ctx.currentTime);
+          gain1.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.22);
+          osc1.connect(gain1);
+          gain1.connect(this.ctx.destination);
+          osc1.start();
+          osc1.stop(this.ctx.currentTime + 0.24);
+
+          const osc2 = this.ctx.createOscillator();
+          const gain2 = this.ctx.createGain();
+          osc2.type = 'sine';
+          osc2.frequency.setValueAtTime(783.99, this.ctx.currentTime + 0.24); // G5
+          gain2.gain.setValueAtTime(0.08, this.ctx.currentTime + 0.24);
+          gain2.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.48);
+          osc2.connect(gain2);
+          gain2.connect(this.ctx.destination);
+          osc2.start(this.ctx.currentTime + 0.24);
+          osc2.stop(this.ctx.currentTime + 0.50);
+        } else {
+          // 적색 신호 / 대기 시: 부드러운 위치 유도 비프음 (귀뚜라미 펄스)
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(659.25, this.ctx.currentTime); // E5
+          gain.gain.setValueAtTime(0.04, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.12);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.14);
+        }
+      }
+    }
+
+    const soundEngine = new SoundEngine();
+
+    /* ══════════════════════════════════════════════════════════════════════
+       2. 절차적 텍스처 (오프라인 100% 작동)
+       ══════════════════════════════════════════════════════════════════════ */
+    function createAsphaltTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#23272e';
+      ctx.fillRect(0, 0, 256, 256);
+
+      for (let i = 0; i < 20000; i++) {
+        const x = Math.random() * 256;
+        const y = Math.random() * 256;
+        const gray = Math.floor(30 + Math.random() * 40);
+        ctx.fillStyle = `rgb(${gray},${gray},${gray})`;
+        ctx.fillRect(x, y, 1.5, 1.5);
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(10, 4);
+      return tex;
+    }
+
+    function createSidewalkTileTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillRect(0, 0, 256, 256);
+
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 3;
+      for (let x = 0; x <= 256; x += 64) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 256); ctx.stroke();
+      }
+      for (let y = 0; y <= 256; y += 64) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(256, y); ctx.stroke();
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(12, 3);
+      return tex;
+    }
+
+    function createHazardCurbTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 32;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillRect(0, 0, 128, 32);
+
+      ctx.fillStyle = '#1e293b';
+      for (let x = -32; x < 160; x += 32) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + 16, 0);
+        ctx.lineTo(x - 4, 32);
+        ctx.lineTo(x - 20, 32);
+        ctx.closePath();
+        ctx.fill();
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(8, 1);
+      return tex;
+    }
+
+    function createTactileDotTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillRect(0, 0, 128, 128);
+
+      for (let ix = 16; ix < 128; ix += 32) {
+        for (let iy = 16; iy < 128; iy += 32) {
+          ctx.beginPath();
+          ctx.arc(ix + 1, iy + 1, 8, 0, Math.PI * 2);
+          ctx.fillStyle = '#b45309';
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(ix, iy, 8, 0, Math.PI * 2);
+          ctx.fillStyle = '#fbbf24';
+          ctx.fill();
+        }
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(4, 2);
+      return tex;
+    }
+
+    const sharedTextures = {
+      asphalt: createAsphaltTexture(),
+      sidewalk: createSidewalkTileTexture(),
+      hazardCurb: createHazardCurbTexture(),
+      tactileDot: createTactileDotTexture()
+    };
+
+    /* ══════════════════════════════════════════════════════════════════════
+       3. 3D 씬 & 조명 초기화
+       ══════════════════════════════════════════════════════════════════════ */
+    const canvas = document.getElementById('webgl-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+
+    const normalSkyColor = new THREE.Color(0xbdd7ee);
+    const normalFog = new THREE.FogExp2(0xcbe0f5, 0.012);
+    const blindFog = new THREE.Fog(0x000000, 0.4, 3.2); // 시각장애인 모드: 암막 상태 & 3.2m 완전 소등
+
+    const scene = new THREE.Scene();
+    scene.background = normalSkyColor;
+    scene.fog = normalFog;
+
+    const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 250);
+
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444455, 0.75);
+    hemiLight.position.set(0, 50, 0);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfff5e6, 1.25);
+    dirLight.position.set(25, 45, 20);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 120;
+    const shadowD = 40;
+    dirLight.shadow.camera.left = -shadowD;
+    dirLight.shadow.camera.right = shadowD;
+    dirLight.shadow.camera.top = shadowD;
+    dirLight.shadow.camera.bottom = -shadowD;
+    scene.add(dirLight);
+
+    // 시각장애인 모드 전용 유저 반경 3m 실루엣 조명
+    const blindPointLight = new THREE.PointLight(0xffffff, 0.0, 3.6, 1.6);
+    scene.add(blindPointLight);
+
+    /* ══════════════════════════════════════════════════════════════════════
+       4. 플레이어 상태 & 체력(Stamina) & 이동 물리학
+       ══════════════════════════════════════════════════════════════════════ */
+    const player = {
+      position: new THREE.Vector3(0, 1.65, 0), // 초기 위치
+      velocity: new THREE.Vector3(0, 0, 0),
+      mode: 'pedestrian', // 'pedestrian' or 'wheelchair'
+      eyeHeight: 1.65,
+      baseSpeed: 3.6, // m/s
+      currentSpeed: 3.6,
+      shakeIntensity: 0.5,
+      walkTimer: 0,
+      currentY: 1.75,
+
+      // 체력 시스템
+      stamina: 100, // 0 ~ 100
+      maxStamina: 100,
+      isExhausted: false,
+      lastCurbCrossingTime: 0, // 단차 통과 체력 소모 쿨다운
+
+      // 게임 통계
+      distanceTraveled: 0,
+      crosswalksCleared: 0,
+      jaywalksCleared: 0,
+      lastChunkIndex: 0
+    };
+
+    // 마우스 회전 제어 객체
+    const pitchObject = new THREE.Object3D();
+    const yawObject = new THREE.Object3D();
+    yawObject.position.copy(player.position);
+    yawObject.add(pitchObject);
+    pitchObject.add(camera);
+    scene.add(yawObject);
+
+    // 전방(-Z 방향)을 향하도록 초기화
+    yawObject.rotation.y = 0;
+
+    let isPointerLocked = false;
+    const keys = {
+      KeyW: false, KeyS: false, KeyA: false, KeyD: false,
+      ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
+      ShiftLeft: false, ShiftRight: false
+    };
+
+    window.addEventListener('keydown', (e) => {
+      // 방향키 화면 스크롤 방지
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+        e.preventDefault();
+      }
+      if (keys.hasOwnProperty(e.code)) keys[e.code] = true;
+      if (e.code === 'KeyC') toggleMode();
+      if (e.code === 'KeyR') resetToOrigin();
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (keys.hasOwnProperty(e.code)) keys[e.code] = false;
+    });
+
+    const startOverlay = document.getElementById('start-overlay');
+    startOverlay.addEventListener('click', () => {
+      startOverlay.style.display = 'none';
+      soundEngine.init();
+      canvas.requestPointerLock();
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+      isPointerLocked = (document.pointerLockElement === canvas);
+    });
+
+    canvas.addEventListener('mousedown', () => {
+      if (!isPointerLocked) {
+        canvas.requestPointerLock();
+        soundEngine.init();
+      }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (isPointerLocked) {
+        const movementX = e.movementX || 0;
+        const movementY = e.movementY || 0;
+        yawObject.rotation.y -= movementX * 0.0022;
+        pitchObject.rotation.x -= movementY * 0.0022;
+        pitchObject.rotation.x = Math.max(-Math.PI / 2.3, Math.min(Math.PI / 2.3, pitchObject.rotation.x));
+      }
+    });
+
+    /* ══════════════════════════════════════════════════════════════════════
+       5. 사륜차 & 이륜차(오토바이) 모델링 및 시스템
+       ══════════════════════════════════════════════════════════════════════ */
+    // 사륜차 (승용차 / 택시) 모델 생성
+    function createCarModel(isTaxi = false) {
+      const car = new THREE.Group();
+      const bodyColor = isTaxi ? 0xf59e0b : [0x2563eb, 0xd97706, 0xdc2626, 0x475569, 0xf1f5f9][Math.floor(Math.random() * 5)];
+      
+      // 차체 하부
+      const bodyGeo = new THREE.BoxGeometry(2.0, 0.7, 4.2);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, metalness: 0.6, roughness: 0.3 });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.position.y = 0.6;
+      body.castShadow = true;
+      car.add(body);
+
+      // 캐빈(유리창/지붕)
+      const cabinGeo = new THREE.BoxGeometry(1.7, 0.6, 2.3);
+      const cabinMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.1, metalness: 0.9 });
+      const cabin = new THREE.Mesh(cabinGeo, cabinMat);
+      cabin.position.set(0, 1.15, -0.2);
+      cabin.castShadow = true;
+      car.add(cabin);
+
+      // 헤드라이트 & 테일라이트
+      const hlGeo = new THREE.BoxGeometry(0.35, 0.15, 0.05);
+      const hlMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const hlL = new THREE.Mesh(hlGeo, hlMat);
+      hlL.position.set(-0.7, 0.6, 2.12);
+      const hlR = hlL.clone();
+      hlR.position.x = 0.7;
+      car.add(hlL, hlR);
+
+      // 바퀴 4개
+      const wheelGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.25, 12);
+      wheelGeo.rotateZ(Math.PI / 2);
+      const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.8 });
+      [[-1.0, 0.35, 1.3], [1.0, 0.35, 1.3], [-1.0, 0.35, -1.3], [1.0, 0.35, -1.3]].forEach(pos => {
+        const w = new THREE.Mesh(wheelGeo, wheelMat);
+        w.position.set(pos[0], pos[1], pos[2]);
+        w.castShadow = true;
+        car.add(w);
+      });
+
+      // 택시 캡 표시등
+      if (isTaxi) {
+        const taxiSignGeo = new THREE.BoxGeometry(0.5, 0.2, 0.3);
+        const taxiSignMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+        const taxiSign = new THREE.Mesh(taxiSignGeo, taxiSignMat);
+        taxiSign.position.set(0, 1.55, -0.2);
+        car.add(taxiSign);
+      }
+
+      car.userData = { type: 'car', radius: 1.4, height: 1.4 };
+      return car;
+    }
+
+    // 이륜차 (배달 오토바이) 모델 생성
+    function createMotorcycleModel() {
+      const bike = new THREE.Group();
+
+      // 프레임 본체
+      const frameGeo = new THREE.BoxGeometry(0.5, 0.6, 1.8);
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.5, roughness: 0.3 });
+      const frame = new THREE.Mesh(frameGeo, frameMat);
+      frame.position.y = 0.6;
+      frame.castShadow = true;
+      bike.add(frame);
+
+      // 배달통 (뒷좌석 박스)
+      const boxGeo = new THREE.BoxGeometry(0.65, 0.6, 0.65);
+      const boxMat = new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.4 });
+      const box = new THREE.Mesh(boxGeo, boxMat);
+      box.position.set(0, 0.95, -0.6);
+      box.castShadow = true;
+      bike.add(box);
+
+      // 앞 헤드라이트
+      const lightGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.08, 12);
+      lightGeo.rotateX(Math.PI / 2);
+      const lightMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+      const headlight = new THREE.Mesh(lightGeo, lightMat);
+      headlight.position.set(0, 0.8, 0.92);
+      bike.add(headlight);
+
+      // 바퀴 2개 (앞뒤)
+      const wheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.15, 12);
+      wheelGeo.rotateZ(Math.PI / 2);
+      const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+      const frontWheel = new THREE.Mesh(wheelGeo, wheelMat);
+      frontWheel.position.set(0, 0.3, 0.9);
+      const rearWheel = new THREE.Mesh(wheelGeo, wheelMat);
+      rearWheel.position.set(0, 0.3, -0.9);
+      bike.add(frontWheel, rearWheel);
+
+      bike.userData = { type: 'motorcycle', radius: 0.9, height: 1.2 };
+      return bike;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════
+       6. 무한 청크 생성 시스템 (Endless Procedural Road & Crosswalk Chunks)
+       ══════════════════════════════════════════════════════════════════════ */
+    // 청크 구조:
+    // 진행 방향: -Z 방향으로 전진
+    // 한 청크 길이: 26m
+    // 청크 구성:
+    // 1) 안전 보도 구역 (폭 6m, Z: 0 ~ 6)
+    // 2) 2차선 도로 구역 (폭 20m, Z: 6 ~ 26) - 차선 1 (X: -40 -> +40), 차선 2 (X: +40 -> -40)
+    // 청크 유형:
+    // • Type 1: 횡단보도 구역 (hasCrosswalk = true)
+    //   - 신호등, 10cm 단차, 점자블록, 흰색 지브라 무늬
+    // • Type 2: 무단횡단 위험 구역 (hasCrosswalk = false)
+    //   - 횡단보도 없음! 보행 신호 없음!
+    //   - 사륜차/오토바이가 고속 질주하므로 틈새를 노려 건너야 함!
+
+    const CHUNK_LENGTH = 26.0;
+    const activeChunks = [];
+    const activeVehicles = [];
+    let nextChunkZ = 13.0; // 0 지점 근처에서 시작
+    let chunkCounter = 0;
+
+    let obstaclesActive = true;
+    let tactileActive = true;
+    let trafficDensityLevel = 2; // 1: 적음, 2: 보통, 3: 많음
+
+    // 신호등 상태 (자동 순환)
+    let globalSignalState = 0; // 0: 보행 적색 / 차량 녹색, 1: 보행 녹색 / 차량 적색
+    let globalSignalMode = 'auto';
+    let globalSignalTimer = 0;
+
+    class RoadChunk {
+      constructor(index, centerZ, hasCrosswalk) {
+        this.index = index;
+        this.centerZ = centerZ;
+        this.hasCrosswalk = hasCrosswalk;
+        this.group = new THREE.Group();
+        this.pedSignals = [];
+        this.curbStepMesh = null;
+        this.tactileMesh = null;
+        this.obstacles = [];
+        this.colliders = []; // 오브제 충돌체 목록 (볼라드, 신호등 기둥, 표지판, 가로수 등)
+
+        // Z 영역 범위:
+        // 보도 영역: centerZ + 7 ~ centerZ + 13 (폭 6m)
+        // 차도 영역: centerZ - 13 ~ centerZ + 7 (폭 20m, 차선 2개)
+        this.sidewalkZMin = centerZ + 7;
+        this.sidewalkZMax = centerZ + 13;
+        this.roadZMin = centerZ - 13;
+        this.roadZMax = centerZ + 7;
+
+        this.buildEnvironment();
+        scene.add(this.group);
+      }
+
+      buildEnvironment() {
+        // 1. 도로 바닥 (2차선 아스팔트: 폭 80m, 길이 20m)
+        const roadGeo = new THREE.PlaneGeometry(80, 20);
+        const roadMat = new THREE.MeshStandardMaterial({
+          map: sharedTextures.asphalt,
+          roughness: 0.85
+        });
+        const road = new THREE.Mesh(roadGeo, roadMat);
+        road.rotation.x = -Math.PI / 2;
+        road.position.set(0, 0, this.centerZ - 3);
+        road.receiveShadow = true;
+        this.group.add(road);
+
+        // 중앙 황색 점선
+        const centerLineGeo = new THREE.PlaneGeometry(80, 0.3);
+        const centerLineMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+        const centerLine = new THREE.Mesh(centerLineGeo, centerLineMat);
+        centerLine.rotation.x = -Math.PI / 2;
+        centerLine.position.set(0, 0.005, this.centerZ - 3);
+        this.group.add(centerLine);
+
+        // 2. 안전 보도 (Sidewalk: 높이 10cm, 폭 80m x 길이 6m)
+        const sidewalkGeo = new THREE.BoxGeometry(80, 0.10, 6);
+        const sidewalkMat = new THREE.MeshStandardMaterial({
+          map: sharedTextures.sidewalk,
+          roughness: 0.9
+        });
+        const sidewalk = new THREE.Mesh(sidewalkGeo, sidewalkMat);
+        sidewalk.position.set(0, 0.05, this.centerZ + 10);
+        sidewalk.receiveShadow = true;
+        sidewalk.castShadow = true;
+        this.group.add(sidewalk);
+
+        // 3. 횡단보도 구역 여부에 따른 분기
+        if (this.hasCrosswalk) {
+          // ── 횡단보도 흰색 지브라 스트라이프 (폭 6m, 도로 20m 관통) ──
+          const stripeGeo = new THREE.PlaneGeometry(5.0, 0.6);
+          const stripeMat = new THREE.MeshBasicMaterial({ color: 0xf8fafc });
+          for (let z = this.roadZMin + 1.2; z <= this.roadZMax - 1.2; z += 1.2) {
+            const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+            stripe.rotation.x = -Math.PI / 2;
+            stripe.position.set(0, 0.008, z);
+            this.group.add(stripe);
+          }
+
+          // ── ★ 10cm 단차 (Curb Step) ──
+          // 보도 끝(Z = centerZ + 7)과 차도 바닥 사이에 10cm 수직 단차 턱 배치
+          const curbGeo = new THREE.BoxGeometry(6.0, 0.10, 0.15);
+          const curbMat = new THREE.MeshStandardMaterial({
+            map: sharedTextures.hazardCurb,
+            roughness: 0.6
+          });
+          this.curbStepMesh = new THREE.Mesh(curbGeo, curbMat);
+          this.curbStepMesh.position.set(0, 0.05, this.centerZ + 7.0);
+          this.curbStepMesh.castShadow = true;
+          this.group.add(this.curbStepMesh);
+
+          // ── ★ 점자블록 (Tactile Paving) ──
+          const tactileGeo = new THREE.BoxGeometry(5.0, 0.015, 0.6);
+          const tactileMat = new THREE.MeshStandardMaterial({
+            map: sharedTextures.tactileDot,
+            roughness: 0.7,
+            emissive: (typeof player !== 'undefined' && player.mode === 'blind') ? 0x92400e : 0x000000
+          });
+          this.tactileMesh = new THREE.Mesh(tactileGeo, tactileMat);
+          this.tactileMesh.position.set(0, 0.105, this.centerZ + 7.6);
+          this.tactileMesh.receiveShadow = true;
+          this.group.add(this.tactileMesh);
+
+          // ── 신호등 기둥 (Pedestrian Signal) ──
+          const sig = this.createSignalPole(-3.6, this.centerZ + 7.6);
+          this.pedSignals.push(sig);
+          this.colliders.push({ x: -3.6, z: this.centerZ + 7.6, radius: 0.35, type: 'signalPole' });
+
+          // ── 볼라드 장애물 ──
+          const bollardGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.8, 12);
+          const bollardMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.7 });
+          [-3.0, 3.0].forEach(bx => {
+            const b = new THREE.Mesh(bollardGeo, bollardMat);
+            b.position.set(bx, 0.5, this.centerZ + 7.2);
+            b.castShadow = true;
+            this.obstacles.push(b);
+            this.colliders.push({ x: bx, z: this.centerZ + 7.2, radius: 0.35, type: 'bollard' });
+            this.group.add(b);
+          });
+        } else {
+          // ── 무단횡단 구역: 횡단보도 없음 표지판 & 가로수 ──
+          const signPoleGeo = new THREE.CylinderGeometry(0.05, 0.05, 2.5, 8);
+          const signPoleMat = new THREE.MeshStandardMaterial({ color: 0x475569 });
+          const signPole = new THREE.Mesh(signPoleGeo, signPoleMat);
+          signPole.position.set(2.5, 1.25, this.centerZ + 7.5);
+          this.group.add(signPole);
+          this.colliders.push({ x: 2.5, z: this.centerZ + 7.5, radius: 0.35, type: 'signPole' });
+
+          const signBoardGeo = new THREE.BoxGeometry(0.8, 0.8, 0.04);
+          const signBoardMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+          const signBoard = new THREE.Mesh(signBoardGeo, signBoardMat);
+          signBoard.position.set(2.5, 2.3, this.centerZ + 7.5);
+          this.group.add(signBoard);
+        }
+
+        // 보도 가로수 배치
+        [-15, 15].forEach(tx => {
+          this.createTree(tx, this.centerZ + 10);
+          this.colliders.push({ x: tx, z: this.centerZ + 10, radius: 0.55, type: 'tree' });
+        });
+
+        // 양옆 배경 건물
+        this.createBuildingBlock(-28, this.centerZ);
+        this.createBuildingBlock(28, this.centerZ);
+
+        // 토글 상태 반영
+        this.updateToggles();
+      }
+
+      createSignalPole(x, z) {
+        const poleGroup = new THREE.Group();
+        poleGroup.position.set(x, 0.1, z);
+
+        const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 3.2, 8);
+        const poleMat = new THREE.MeshStandardMaterial({ color: 0x334155 });
+        const pole = new THREE.Mesh(poleGeo, poleMat);
+        pole.position.y = 1.6;
+        pole.castShadow = true;
+        poleGroup.add(pole);
+
+        const boxGeo = new THREE.BoxGeometry(0.35, 0.7, 0.3);
+        const boxMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
+        const box = new THREE.Mesh(boxGeo, boxMat);
+        box.position.set(0, 2.4, 0);
+        poleGroup.add(box);
+
+        const lampGeo = new THREE.CircleGeometry(0.1, 12);
+        const redLampMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+        const redLamp = new THREE.Mesh(lampGeo, redLampMat);
+        redLamp.position.set(0, 2.55, 0.16);
+        poleGroup.add(redLamp);
+
+        const greenLampMat = new THREE.MeshBasicMaterial({ color: 0x064e3b });
+        const greenLamp = new THREE.Mesh(lampGeo, greenLampMat);
+        greenLamp.position.set(0, 2.25, 0.16);
+        poleGroup.add(greenLamp);
+
+        this.group.add(poleGroup);
+        return { redLamp, greenLamp };
+      }
+
+      createTree(x, z) {
+        const tree = new THREE.Group();
+        tree.position.set(x, 0.1, z);
+
+        const trunkGeo = new THREE.CylinderGeometry(0.18, 0.22, 2.5, 8);
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 });
+        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+        trunk.position.y = 1.25;
+        tree.add(trunk);
+
+        const foliageGeo = new THREE.DodecahedronGeometry(1.5, 1);
+        const foliageMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.8 });
+        const foliage = new THREE.Mesh(foliageGeo, foliageMat);
+        foliage.position.y = 3.2;
+        tree.add(foliage);
+
+        this.group.add(tree);
+      }
+
+      createBuildingBlock(x, z) {
+        const h = 18 + Math.random() * 15;
+        const bGeo = new THREE.BoxGeometry(14, h, CHUNK_LENGTH - 2);
+        const bColors = [0x334155, 0x475569, 0x1e293b, 0x3b4252];
+        const bMat = new THREE.MeshStandardMaterial({
+          color: bColors[Math.floor(Math.random() * bColors.length)],
+          roughness: 0.7
+        });
+        const b = new THREE.Mesh(bGeo, bMat);
+        b.position.set(x, h / 2, z);
+        this.group.add(b);
+      }
+
+      updateToggles() {
+        if (this.curbStepMesh) this.curbStepMesh.visible = obstaclesActive;
+        if (this.tactileMesh) this.tactileMesh.visible = tactileActive;
+        this.obstacles.forEach(o => o.visible = obstaclesActive);
+      }
+
+      updateSignals(state) {
+        this.pedSignals.forEach(sig => {
+          if (state === 1) {
+            sig.redLamp.material.color.setHex(0x450a0a);
+            sig.greenLamp.material.color.setHex(0x10b981);
+          } else {
+            sig.redLamp.material.color.setHex(0xef4444);
+            sig.greenLamp.material.color.setHex(0x064e3b);
+          }
+        });
+      }
+
+      destroy() {
+        scene.remove(this.group);
+      }
+    }
+
+    // 청크 생성기 (최초 5개 청크 생성)
+    function spawnNextChunk() {
+      // 횡단보도와 무단횡단 구역이 번갈아 또는 랜덤하게 배치 (첫 청크는 횡단보도로 안전 시작)
+      const hasCrosswalk = (chunkCounter === 0) || (Math.random() < 0.55);
+      const chunk = new RoadChunk(chunkCounter, nextChunkZ, hasCrosswalk);
+      activeChunks.push(chunk);
+
+      // 도로에 차량 스폰 (사륜차 or 이륜차)
+      spawnVehiclesForChunk(chunk);
+
+      nextChunkZ -= CHUNK_LENGTH;
+      chunkCounter++;
+    }
+
+    // 차량 스폰 로직
+    function spawnVehiclesForChunk(chunk) {
+      // 차선 1 (Z: chunk.centerZ + 2, 방향: +X 진행)
+      // 차선 2 (Z: chunk.centerZ - 8, 방향: -X 진행)
+      const lane1Z = chunk.centerZ + 2;
+      const lane2Z = chunk.centerZ - 8;
+
+      const vehicleCount = trafficDensityLevel === 1 ? 2 : (trafficDensityLevel === 2 ? 3 : 5);
+
+      for (let i = 0; i < vehicleCount; i++) {
+        const isLane1 = (i % 2 === 0);
+        const laneZ = isLane1 ? lane1Z : lane2Z;
+        const direction = isLane1 ? 1 : -1; // 1: +X, -1: -X
+
+        // 40% 확률로 오토바이(이륜차), 60% 확률로 승용차/택시(사륜차)
+        const isMotorcycle = Math.random() < 0.4;
+        const vehicle = isMotorcycle ? createMotorcycleModel() : createCarModel(Math.random() < 0.25);
+
+        // 초기 X 위치 분산
+        const startX = (Math.random() * 80 - 40);
+        vehicle.position.set(startX, 0, laneZ);
+        vehicle.rotation.y = isLane1 ? Math.PI / 2 : -Math.PI / 2;
+
+        // 차량 주행 속도 (오토바이가 더 빠름)
+        const baseSpeed = isMotorcycle ? (14 + Math.random() * 8) : (10 + Math.random() * 6);
+
+        vehicle.userData.speed = baseSpeed * direction;
+        vehicle.userData.laneZ = laneZ;
+        vehicle.userData.chunk = chunk;
+        vehicle.userData.hasCrosswalk = chunk.hasCrosswalk;
+
+        scene.add(vehicle);
+        activeVehicles.push(vehicle);
+      }
+    }
+
+    // 초기 청크 생성
+    for (let i = 0; i < 6; i++) {
+      spawnNextChunk();
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════
+       7. UI 컨트롤러 및 이벤트 바인딩
+       ══════════════════════════════════════════════════════════════════════ */
+    const warningToast = document.getElementById('warning-toast');
+    const blockedToast = document.getElementById('blocked-toast');
+    const crashToast = document.getElementById('crash-toast');
+    const zoneToast = document.getElementById('zone-toast');
+    const zoneIcon = document.getElementById('zone-icon');
+    const zoneText = document.getElementById('zone-text');
+    const dangerVignette = document.getElementById('danger-vignette');
+    const reticle = document.getElementById('reticle');
+
+    const btnPedestrian = document.getElementById('btn-mode-pedestrian');
+    const btnWheelchair = document.getElementById('btn-mode-wheelchair');
+    const btnElderly = document.getElementById('btn-mode-elderly');
+    const btnBlind = document.getElementById('btn-mode-blind');
+    const elderlyBlurOverlay = document.getElementById('elderly-blur-overlay');
+    const blindSilhouetteOverlay = document.getElementById('blind-silhouette-overlay');
+    const tactileToast = document.getElementById('tactile-toast');
+    const modeBadge = document.getElementById('mode-badge');
+    const modeBadgeText = document.getElementById('mode-badge-text');
+
+    const sliderCameraHeight = document.getElementById('slider-camera-height');
+    const labelCameraHeight = document.getElementById('label-camera-height');
+    const sliderMoveSpeed = document.getElementById('slider-move-speed');
+    const labelMoveSpeed = document.getElementById('label-move-speed');
+    const sliderShake = document.getElementById('slider-shake-intensity');
+    const labelShake = document.getElementById('label-shake-intensity');
+    const sliderTraffic = document.getElementById('slider-traffic-density');
+    const labelTraffic = document.getElementById('label-traffic-density');
+
+    const toggleTactile = document.getElementById('toggle-tactile');
+    const toggleObstacles = document.getElementById('toggle-obstacles');
+    const toggleSound = document.getElementById('toggle-sound');
+
+    const distDisplay = document.getElementById('dist-display');
+    const crosswalkDisplay = document.getElementById('crosswalk-count-display');
+    const jaywalkDisplay = document.getElementById('jaywalk-count-display');
+    const fpsCounter = document.getElementById('fps-counter');
+
+    const staminaBarFill = document.getElementById('stamina-bar-fill');
+    const staminaText = document.getElementById('stamina-text');
+
+    // 모드 전환 (보행자 / 휠체어 / 노인 / 시각장애인)
+    function setMode(mode) {
+      player.mode = mode;
+      btnPedestrian.className = 'mode-btn';
+      btnWheelchair.className = 'mode-btn';
+      btnElderly.className = 'mode-btn';
+      btnBlind.className = 'mode-btn';
+      elderlyBlurOverlay.classList.remove('active');
+      blindSilhouetteOverlay.classList.remove('active');
+
+      // 3D 환경 기본 조명 & 포그 복원
+      scene.background = normalSkyColor;
+      scene.fog = normalFog;
+      dirLight.intensity = 1.25;
+      hemiLight.intensity = 0.75;
+      blindPointLight.intensity = 0.0;
+
+      // 점자블록 발광 리셋
+      activeChunks.forEach(c => {
+        if (c.tactileMesh) c.tactileMesh.material.emissive.setHex(0x000000);
+      });
+
+      if (mode === 'wheelchair') {
+        btnWheelchair.className = 'mode-btn active-wheelchair';
+        modeBadge.className = 'badge badge-wheelchair';
+        modeBadgeText.innerText = '휠체어 모드 (단차 통과 시 체력 -50%)';
+        player.eyeHeight = 1.15;
+        player.baseSpeed = 2.8;
+        sliderCameraHeight.value = '1.15';
+        labelCameraHeight.innerText = '1.15m';
+        sliderMoveSpeed.value = '2.8';
+        labelMoveSpeed.innerText = '2.8 m/s';
+      } else if (mode === 'elderly') {
+        btnElderly.className = 'mode-btn active-elderly';
+        modeBadge.className = 'badge badge-elderly';
+        modeBadgeText.innerText = '고령자(노인) 모드 (시야 저하·보행 완만)';
+        elderlyBlurOverlay.classList.add('active'); // 백내장/노안 흐린 시야 필터 활성화
+        player.eyeHeight = 1.45; // 노인 굽은 자세 표준 시점
+        player.baseSpeed = 2.2;  // 노인 평균 보행 속도
+        sliderCameraHeight.value = '1.45';
+        labelCameraHeight.innerText = '1.45m';
+        sliderMoveSpeed.value = '2.2';
+        labelMoveSpeed.innerText = '2.2 m/s';
+      } else if (mode === 'blind') {
+        btnBlind.className = 'mode-btn active-blind';
+        modeBadge.className = 'badge badge-blind';
+        modeBadgeText.innerText = '시각장애인 모드 (암막 · 반경 3m 실루엣 · 지팡이/음향신호)';
+        blindSilhouetteOverlay.classList.add('active'); // 암막 비네트
+
+        // 3D 완전 암막 & 3m 실루엣 조명 모드 진입
+        scene.background = new THREE.Color(0x000000);
+        scene.fog = blindFog;
+        dirLight.intensity = 0.0; // 햇빛 완전 소등
+        hemiLight.intensity = 0.02; // 극미량 바닥 반사
+        blindPointLight.intensity = 3.6; // 유저 중심 3m 실루엣 포인트 라이트
+        blindPointLight.distance = 3.6;
+
+        // 점자블록 촉각 안내 은은한 발광
+        activeChunks.forEach(c => {
+          if (c.tactileMesh) c.tactileMesh.material.emissive.setHex(0xb45309);
+        });
+
+        player.eyeHeight = 1.62;
+        player.baseSpeed = 3.0; // 신중한 지팡이 촉각 탐색 보행 속도
+        sliderCameraHeight.value = '1.62';
+        labelCameraHeight.innerText = '1.62m';
+        sliderMoveSpeed.value = '3.0';
+        labelMoveSpeed.innerText = '3.0 m/s';
+      } else {
+        btnPedestrian.className = 'mode-btn active-pedestrian';
+        modeBadge.className = 'badge';
+        modeBadgeText.innerText = '일반 보행자 모드 (시점 1.65m)';
+        player.eyeHeight = 1.65;
+        player.baseSpeed = 3.6;
+        sliderCameraHeight.value = '1.65';
+        labelCameraHeight.innerText = '1.65m';
+        sliderMoveSpeed.value = '3.6';
+        labelMoveSpeed.innerText = '3.6 m/s';
+      }
+    }
+
+    function toggleMode() {
+      if (player.mode === 'pedestrian') setMode('wheelchair');
+      else if (player.mode === 'wheelchair') setMode('elderly');
+      else if (player.mode === 'elderly') setMode('blind');
+      else setMode('pedestrian');
+    }
+
+    btnPedestrian.addEventListener('click', () => setMode('pedestrian'));
+    btnWheelchair.addEventListener('click', () => setMode('wheelchair'));
+    btnElderly.addEventListener('click', () => setMode('elderly'));
+    btnBlind.addEventListener('click', () => setMode('blind'));
+
+    sliderCameraHeight.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      player.eyeHeight = val;
+      labelCameraHeight.innerText = `${val.toFixed(2)}m`;
+    });
+
+    sliderMoveSpeed.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      player.baseSpeed = val;
+      labelMoveSpeed.innerText = `${val.toFixed(1)} m/s`;
+    });
+
+    sliderShake.addEventListener('input', (e) => {
+      const val = parseInt(e.target.value);
+      player.shakeIntensity = val / 100;
+      labelShake.innerText = `${val}%`;
+    });
+
+    sliderTraffic.addEventListener('input', (e) => {
+      trafficDensityLevel = parseInt(e.target.value);
+      const labels = ['', '한산함', '보통', '복잡함(고난도)'];
+      labelTraffic.innerText = labels[trafficDensityLevel];
+    });
+
+    toggleTactile.addEventListener('change', (e) => {
+      tactileActive = e.target.checked;
+      activeChunks.forEach(c => c.updateToggles());
+    });
+
+    toggleObstacles.addEventListener('change', (e) => {
+      obstaclesActive = e.target.checked;
+      activeChunks.forEach(c => c.updateToggles());
+    });
+
+    toggleSound.addEventListener('change', (e) => {
+      soundEngine.enabled = e.target.checked;
+    });
+
+    // 신호등 제어
+    const btnSignalGreen = document.getElementById('btn-signal-green');
+    const btnSignalRed = document.getElementById('btn-signal-red');
+    const btnSignalAuto = document.getElementById('btn-signal-auto');
+
+    function resetSignalBtnStyles() {
+      btnSignalGreen.classList.remove('active');
+      btnSignalRed.classList.remove('active');
+      btnSignalAuto.classList.remove('active');
+    }
+
+    btnSignalGreen.addEventListener('click', () => {
+      globalSignalMode = 'green';
+      resetSignalBtnStyles();
+      btnSignalGreen.classList.add('active');
+      updateAllSignals(1);
+    });
+
+    btnSignalRed.addEventListener('click', () => {
+      globalSignalMode = 'red';
+      resetSignalBtnStyles();
+      btnSignalRed.classList.add('active');
+      updateAllSignals(0);
+    });
+
+    btnSignalAuto.addEventListener('click', () => {
+      globalSignalMode = 'auto';
+      resetSignalBtnStyles();
+      btnSignalAuto.classList.add('active');
+    });
+
+    function updateAllSignals(state) {
+      globalSignalState = state;
+      activeChunks.forEach(c => c.updateSignals(state));
+    }
+
+    // 리셋
+    function resetToOrigin() {
+      player.position.set(0, 0.1, 10.0);
+      yawObject.position.copy(player.position);
+      yawObject.rotation.y = 0;
+      pitchObject.rotation.x = 0;
+      player.stamina = 100;
+      player.isExhausted = false;
+      player.distanceTraveled = 0;
+      player.crosswalksCleared = 0;
+      player.jaywalksCleared = 0;
+    }
+
+    document.getElementById('btn-reset-pos').addEventListener('click', resetToOrigin);
+
+    // 패널 접기/펼치기
+    const panelContainer = document.getElementById('panel-container');
+    const panelToggleBtn = document.getElementById('panel-toggle-btn');
+    const minimizeBtn = document.getElementById('minimize-btn');
+
+    minimizeBtn.addEventListener('click', () => {
+      panelContainer.style.display = 'none';
+      panelToggleBtn.style.display = 'inline-flex';
+    });
+
+    panelToggleBtn.addEventListener('click', () => {
+      panelContainer.style.display = 'flex';
+      panelToggleBtn.style.display = 'none';
+    });
+
+    /* ══════════════════════════════════════════════════════════════════════
+       8. 물리 판정 (단차 충돌, 휠체어 제약, 차량 충돌 판정)
+       ══════════════════════════════════════════════════════════════════════ */
+    let lastBlockedAlertTime = 0;
+    let lastCrashAlertTime = 0;
+
+    function checkStepAndRoadConstraints(targetPos, currentPos) {
+      // 0. 청크 내 오브제(볼라드, 신호등 기둥, 표지판, 가로수) 탄성 슬라이딩 충돌 처리 (오브제 접근 시 멈춤 현상 원천 차단)
+      if (obstaclesActive) {
+        for (let i = 0; i < activeChunks.length; i++) {
+          const chunk = activeChunks[i];
+          if (Math.abs(chunk.centerZ - targetPos.z) > 16) continue;
+          if (chunk.colliders) {
+            for (let j = 0; j < chunk.colliders.length; j++) {
+              const col = chunk.colliders[j];
+              const dx = targetPos.x - col.x;
+              const dz = targetPos.z - col.z;
+              const dist = Math.hypot(dx, dz);
+              if (dist < col.radius && dist > 0.0001) {
+                // 탄성 밀어내기: 충돌 경계면을 따라 미끄러지도록 투영하여 멈춤 없이 부드럽게 통과
+                const push = col.radius - dist;
+                targetPos.x += (dx / dist) * push;
+                targetPos.z += (dz / dist) * push;
+              }
+            }
+          }
+        }
+      }
+
+      // 플레이어가 위치한 청크 찾기
+      const currentChunk = activeChunks.find(c =>
+        targetPos.z <= (c.centerZ + 13) && targetPos.z >= (c.centerZ - 13)
+      );
+
+      if (!currentChunk) return { blocked: false, newPos: targetPos };
+
+      // 1. 단차 접근 경고 (횡단보도가 있는 청크의 보도 턱: Z = centerZ + 7.0)
+      if (currentChunk.hasCrosswalk && obstaclesActive) {
+        const curbZ = currentChunk.centerZ + 7.0;
+        const distToCurb = Math.abs(currentPos.z - curbZ);
+        const nearCrosswalkX = Math.abs(currentPos.x) < 3.5;
+
+        // 보도에서 차도 쪽 단차 1.8m 이내 접근 시 경고 (보도에 서 있을 때만)
+        if (distToCurb < 1.8 && nearCrosswalkX && currentPos.z > curbZ) {
+          warningToast.classList.add('show');
+          dangerVignette.classList.add('active');
+          reticle.classList.add('active');
+          soundEngine.playWarningBeep();
+        } else {
+          warningToast.classList.remove('show');
+          if (!dangerVignette.dataset.crashing) dangerVignette.classList.remove('active');
+          reticle.classList.remove('active');
+        }
+
+        // 2. 단차 통과 여부 검사 (보도 <-> 차도 경계 통과 시에만 판정)
+        // 보도(z > curbZ)에서 차도(z <= curbZ)로 내려가거나, 차도에서 보도로 올라오는 이동 벡터 판정
+        const crossingToRoad = (currentPos.z >= curbZ - 0.05 && targetPos.z < curbZ);
+        const crossingToSidewalk = (currentPos.z <= curbZ + 0.05 && targetPos.z > curbZ);
+        const isAttemptingCurbCrossing = (crossingToRoad || crossingToSidewalk) && Math.abs(targetPos.x) < 4.0;
+
+        if (isAttemptingCurbCrossing && (player.mode === 'wheelchair' || player.mode === 'elderly')) {
+          if (player.mode === 'wheelchair') {
+            if (player.stamina <= 10 || player.isExhausted) {
+              triggerBlockedAlert("이동 불가: 탈진 상태! 체력이 부족하여 10cm 단차를 넘을 수 없습니다.");
+              // 단차 앞 차단: Z축 전진만 차단하고, 좌우(X) 이동 및 뒤로 물러서기는 완전히 허용하여 멈춤 방지!
+              targetPos.z = crossingToRoad ? (curbZ + 0.06) : (curbZ - 0.06);
+              return { blocked: false, newPos: targetPos };
+            }
+
+            const nowTime = performance.now();
+            if (nowTime - player.lastCurbCrossingTime > 1600) {
+              player.lastCurbCrossingTime = nowTime;
+              player.stamina = Math.max(0, player.stamina - 50); // 휠체어 단차 극복 체력 50% 급감
+              soundEngine.playCurbStruggleSound();
+              triggerDrainAlert("10cm 단차 극복! 체력 극심하게 감소 (-50%)", "휠체어로 10cm 턱을 오르내리느라 팔과 상체 근육이 급격히 지쳤습니다!");
+              camera.position.y -= 0.16;
+              pitchObject.rotation.x -= 0.08;
+            }
+            // 넘는 프레임의 일시적 저항 (Z축 변위만 완화, 절대 속도 영구 감속 안 함)
+            targetPos.z = currentPos.z + (targetPos.z - currentPos.z) * 0.45;
+          } else if (player.mode === 'elderly') {
+            if (player.stamina <= 8 || player.isExhausted) {
+              triggerBlockedAlert("이동 불가: 탈진 상태! 다리에 힘이 빠져 10cm 단차를 넘을 수 없습니다.");
+              // 단차 앞 차단: Z축 전진만 차단, 좌우/후진 이동 허용
+              targetPos.z = crossingToRoad ? (curbZ + 0.06) : (curbZ - 0.06);
+              return { blocked: false, newPos: targetPos };
+            }
+
+            const nowTime = performance.now();
+            if (nowTime - player.lastCurbCrossingTime > 1600) {
+              player.lastCurbCrossingTime = nowTime;
+              player.stamina = Math.max(0, player.stamina - 25); // 노인 관절 부담 25% 급감
+              soundEngine.playStepSound(false);
+              triggerDrainAlert("10cm 보도 단차! 무릎 관절 부담 (체력 -25%)", "고령자는 10cm 높은 보도 턱을 오르내릴 때 낙상 및 관절 충격 위험이 큽니다.");
+              camera.position.y -= 0.1;
+            }
+            targetPos.z = currentPos.z + (targetPos.z - currentPos.z) * 0.6;
+          }
+        }
+      }
+
+      // 좌우 도로 이탈 방지 벽 (X: -32m ~ +32m)
+      if (targetPos.x < -32) targetPos.x = -32;
+      if (targetPos.x > 32) targetPos.x = 32;
+
+      return { blocked: false, newPos: targetPos };
+    }
+
+    function triggerBlockedAlert(customMsg) {
+      const now = performance.now();
+      if (now - lastBlockedAlertTime < 800) return;
+      lastBlockedAlertTime = now;
+
+      soundEngine.playBlockedBuzz();
+      if (customMsg) {
+        blockedToast.querySelector('div div').innerText = customMsg;
+      } else {
+        blockedToast.querySelector('div div').innerText = "이동 불가: 10cm 단차 및 차도 진입 차단";
+      }
+      blockedToast.classList.add('show');
+      dangerVignette.classList.add('active');
+
+      setTimeout(() => {
+        blockedToast.classList.remove('show');
+        if (!warningToast.classList.contains('show') && !drainToast.classList.contains('show')) {
+          dangerVignette.classList.remove('active');
+        }
+      }, 1400);
+    }
+
+    const drainToast = document.getElementById('drain-toast');
+    let drainTimeout = null;
+    function triggerDrainAlert(title, desc) {
+      if (title) drainToast.querySelector('div div:first-child').innerText = title;
+      if (desc) drainToast.querySelector('div div:last-child').innerText = desc;
+      drainToast.classList.add('show');
+      dangerVignette.classList.add('active');
+
+      if (drainTimeout) clearTimeout(drainTimeout);
+      drainTimeout = setTimeout(() => {
+        drainToast.classList.remove('show');
+        if (!warningToast.classList.contains('show') && !blockedToast.classList.contains('show')) {
+          dangerVignette.classList.remove('active');
+        }
+      }, 2200);
+    }
+
+    function triggerCrashAlert() {
+      const now = performance.now();
+      if (now - lastCrashAlertTime < 1500) return;
+      lastCrashAlertTime = now;
+
+      soundEngine.playCrashSound();
+      crashToast.classList.add('show');
+      dangerVignette.classList.add('active');
+      dangerVignette.dataset.crashing = 'true';
+
+      // 플레이어를 직전 안전 보도로 4m 튕겨냄
+      player.position.z += 4.5;
+      yawObject.position.z = player.position.z;
+
+      setTimeout(() => {
+        crashToast.classList.remove('show');
+        delete dangerVignette.dataset.crashing;
+        dangerVignette.classList.remove('active');
+      }, 1600);
+    }
+
+    // 구간 진입 안내 토스트 (무단횡단 vs 횡단보도)
+    let lastAnnouncedChunkIndex = -1;
+    function updateZoneAnnouncements(playerZ) {
+      const currentChunk = activeChunks.find(c =>
+        playerZ <= (c.centerZ + 13) && playerZ >= (c.centerZ - 13)
+      );
+
+      if (currentChunk && currentChunk.index !== lastAnnouncedChunkIndex) {
+        lastAnnouncedChunkIndex = currentChunk.index;
+
+        if (currentChunk.hasCrosswalk) {
+          zoneIcon.innerText = '🚸';
+          zoneText.innerText = `[횡단보도 구역] 신호등과 10cm 보도 단차를 확인하세요.`;
+          zoneToast.classList.add('show');
+        } else {
+          zoneIcon.innerText = '⚠️';
+          zoneText.innerText = `[무단횡단 위험 구역] 횡단보도가 없습니다! 사륜차와 오토바이를 피해 건너세요!`;
+          zoneToast.classList.add('show');
+        }
+
+        setTimeout(() => zoneToast.classList.remove('show'), 3000);
+      }
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════
+       9. 메인 게임 & 물리 루프
+       ══════════════════════════════════════════════════════════════════════ */
+    let lastTime = performance.now();
+    let frameCount = 0;
+    let lastFpsUpdate = 0;
+    let stepSoundTimer = 0;
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const now = performance.now();
+      const delta = Math.min((now - lastTime) / 1000, 0.1);
+      lastTime = now;
+
+      // FPS 측정
+      frameCount++;
+      if (now - lastFpsUpdate > 500) {
+        const fps = Math.round((frameCount * 1000) / (now - lastFpsUpdate));
+        fpsCounter.innerText = fps;
+        frameCount = 0;
+        lastFpsUpdate = now;
+      }
+
+      // 신호등 자동 순환
+      if (globalSignalMode === 'auto') {
+        globalSignalTimer += delta;
+        if (globalSignalTimer > 13) globalSignalTimer = 0;
+        const newSig = globalSignalTimer > 7 ? 1 : 0;
+        if (newSig !== globalSignalState) updateAllSignals(newSig);
+      }
+
+      // ── 체력(Stamina) & 이동 속도 계산 ──
+      const isSprinting = (keys.ShiftLeft || keys.ShiftRight);
+      const isWheelchair = (player.mode === 'wheelchair');
+      const isElderly = (player.mode === 'elderly');
+      const isBlind = (player.mode === 'blind');
+
+      // 이동 방향 벡터 계산 (WASD 및 방향키 호환)
+      const moveDirection = new THREE.Vector3();
+      if (keys.KeyW || keys.ArrowUp) moveDirection.z -= 1;
+      if (keys.KeyS || keys.ArrowDown) moveDirection.z += 1;
+      if (keys.KeyA || keys.ArrowLeft) moveDirection.x -= 1;
+      if (keys.KeyD || keys.ArrowRight) moveDirection.x += 1;
+
+      const isMoving = moveDirection.lengthSq() > 0;
+
+      // 체력 소모 & 충전 로직
+      if (isMoving) {
+        // 체력 소모율: 휠체어와 노인은 체력이 빠르게 소모됨
+        let drainRate = 4;
+        if (isWheelchair) drainRate = isSprinting ? 16 : 6;
+        else if (isElderly) drainRate = isSprinting ? 18 : 7; // 노인: 빠른 걸음 18/s, 일반 보행 7/s (휠체어만큼 저체력)
+        else if (isBlind) drainRate = isSprinting ? 12 : 4;
+        else drainRate = isSprinting ? 14 : 4;
+
+        player.stamina = Math.max(0, player.stamina - drainRate * delta);
+      } else {
+        // 정지 휴식 시 자동 충전
+        const rechargeRate = isElderly ? 18 : 22;
+        player.stamina = Math.min(player.maxStamina, player.stamina + rechargeRate * delta);
+      }
+
+      // 탈진 판정: 체력 0 도달 시 탈진 상태 돌입 (체력 25% 회복 전까지 유지)
+      if (player.stamina <= 0.1) {
+        player.isExhausted = true;
+      } else if (player.stamina > 25) {
+        player.isExhausted = false;
+      }
+
+      // 체력 게이지 UI 업데이트
+      const staminaPct = Math.round(player.stamina);
+      staminaBarFill.style.width = `${staminaPct}%`;
+      staminaText.innerText = `${staminaPct}%`;
+
+      if (player.isExhausted) {
+        staminaBarFill.className = 'danger';
+        staminaText.innerText = `${staminaPct}% (탈진! 속도 저하)`;
+        staminaText.style.color = '#ef4444';
+      } else if (player.stamina < 35) {
+        staminaBarFill.className = 'warning';
+        staminaText.style.color = '#f59e0b';
+      } else {
+        staminaBarFill.className = '';
+        staminaText.style.color = '#10b981';
+      }
+
+      // 최종 속도 결정
+      let speedMultiplier = 1.0;
+      if (isWheelchair) {
+        // 휠체어 기본 속도: 2.8m/s, 스프린트 4.6m/s
+        speedMultiplier = 0.8;
+        if (isSprinting && !player.isExhausted) speedMultiplier = 1.35;
+      } else if (isElderly) {
+        // 노인: 기본 걸음 0.65 (약 2.2m/s), 빠른 걸음 1.15 (약 3.2m/s)
+        speedMultiplier = 0.65;
+        if (isSprinting && !player.isExhausted) speedMultiplier = 1.15;
+      } else if (isBlind) {
+        // 시각장애인: 신중한 지팡이 촉각 보행
+        speedMultiplier = 0.85;
+        if (isSprinting && !player.isExhausted) speedMultiplier = 1.25;
+      } else {
+        // 보행자 기본 속도: 3.6m/s, 전력질주 6.2m/s
+        speedMultiplier = 1.0;
+        if (isSprinting && !player.isExhausted) speedMultiplier = 1.7;
+      }
+
+      // 탈진 시 속도 70% 저하 (기어가듯 이동)
+      if (player.isExhausted) {
+        speedMultiplier *= 0.32;
+      }
+
+      player.currentSpeed = player.baseSpeed * speedMultiplier;
+
+      // ── 보도 및 청크 판정 ──
+      const currentChunk = activeChunks.find(c =>
+        player.position.z <= (c.centerZ + 13) && player.position.z >= (c.centerZ - 13)
+      );
+
+      // 점자블록 위치 감지 (시각장애인 모드)
+      const onTactile = currentChunk && currentChunk.hasCrosswalk &&
+                        Math.abs(player.position.x) < 2.5 &&
+                        Math.abs(player.position.z - (currentChunk.centerZ + 7.6)) < 0.45;
+
+      if (onTactile && player.mode === 'blind') {
+        tactileToast.classList.add('show');
+      } else {
+        tactileToast.classList.remove('show');
+      }
+
+      // ── 시각장애인 음향신호기 안내음 (횡단보도 14m 이내 접근 시) ──
+      if (player.mode === 'blind') {
+        const nearbyCrosswalk = activeChunks.find(c =>
+          c.hasCrosswalk && Math.abs((c.centerZ + 7.0) - player.position.z) < 14.0
+        );
+        if (nearbyCrosswalk) {
+          soundEngine.playAcousticSignal(globalSignalState === 1);
+        }
+      }
+
+      // ── 플레이어 위치 갱신 ──
+      if (isMoving) {
+        moveDirection.normalize();
+        moveDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), yawObject.rotation.y);
+
+        const moveDist = player.currentSpeed * delta;
+        const targetPos = player.position.clone().add(moveDirection.multiplyScalar(moveDist));
+
+        // 단차 & 물리 충돌 검사
+        const checkResult = checkStepAndRoadConstraints(targetPos, player.position);
+        if (!checkResult.blocked) {
+          player.position.copy(checkResult.newPos);
+        }
+
+        // 헤드 바빙 (화면 흔들림)
+        player.walkTimer += delta * (player.currentSpeed * 2.8);
+        const bob = Math.sin(player.walkTimer) * (0.04 * player.shakeIntensity);
+        camera.position.y = bob;
+
+        // 발걸음 사운드 / 흰지팡이 타격음
+        stepSoundTimer += delta;
+        const stepInterval = isWheelchair ? 0.32 : (isBlind ? 0.36 : 0.42);
+        if (stepSoundTimer > stepInterval) {
+          if (isBlind) {
+            soundEngine.playCaneTap(onTactile);
+          } else {
+            soundEngine.playStepSound(isWheelchair);
+          }
+          stepSoundTimer = 0;
+        }
+      } else {
+        camera.position.y = THREE.MathUtils.lerp(camera.position.y, 0, delta * 8);
+      }
+
+      // 보도/차도 높이 판정 (보도: Y=0.10m, 차도: Y=0.0m)
+      const onSidewalk = currentChunk ? (player.position.z > (currentChunk.centerZ + 7.0)) : true;
+      const groundHeight = onSidewalk ? 0.10 : 0.0;
+      const targetEyeY = groundHeight + player.eyeHeight;
+      player.currentY = THREE.MathUtils.lerp(player.currentY, targetEyeY, delta * 12);
+
+      yawObject.position.set(player.position.x, player.currentY, player.position.z);
+
+      // 시각장애인 모드 실루엣 라이트 위치 플레이어 시점에 동기화
+      if (player.mode === 'blind') {
+        blindPointLight.position.set(player.position.x, player.currentY, player.position.z);
+      }
+
+      // 태양광 위치가 플레이어를 따라가도록 동기화 (그림자 최적화)
+      if (player.mode !== 'blind') {
+        dirLight.position.set(player.position.x + 25, 45, player.position.z + 20);
+        dirLight.target = yawObject;
+      }
+
+      // ── 진행 거리 & 횡단보도 통과 카운터 갱신 ──
+      const distance = Math.max(0, Math.floor(-player.position.z + 10));
+      player.distanceTraveled = distance;
+      distDisplay.innerText = `${distance} m`;
+
+      if (currentChunk && currentChunk.index > player.lastChunkIndex) {
+        player.lastChunkIndex = currentChunk.index;
+        if (currentChunk.hasCrosswalk) {
+          player.crosswalksCleared++;
+          crosswalkDisplay.innerText = `${player.crosswalksCleared}개`;
+        } else {
+          player.jaywalksCleared++;
+          jaywalkDisplay.innerText = `${player.jaywalksCleared}회`;
+        }
+      }
+
+      updateZoneAnnouncements(player.position.z);
+
+      // ── 10. 무한 청크 관리 (앞으로 가면 생성, 뒤처진 청크 제거) ──
+      // 플레이어 전방 60m 이내에 새 청크가 필요하면 자동 생성
+      if (player.position.z - nextChunkZ < 75.0) {
+        spawnNextChunk();
+      }
+
+      // 플레이어보다 45m 뒤로 지나간 청크 및 차량 정리
+      for (let i = activeChunks.length - 1; i >= 0; i--) {
+        const c = activeChunks[i];
+        if (c.centerZ - player.position.z > 50.0) {
+          c.destroy();
+          activeChunks.splice(i, 1);
+        }
+      }
+
+      // ── 11. 차량 주행 및 충돌 검사 (사륜차 / 이륜차) ──
+      for (let i = activeVehicles.length - 1; i >= 0; i--) {
+        const v = activeVehicles[i];
+
+        // 횡단보도 신호 대기 (보행자 녹색일 때 횡단보도 앞 정지선 감속/정지)
+        let shouldStop = false;
+        if (v.userData.hasCrosswalk && globalSignalState === 1) {
+          // 정지선 위치(X: ±4m 근방) 접근 시 정지
+          if (v.userData.speed > 0 && v.position.x < -3.5 && v.position.x > -14) {
+            shouldStop = true;
+          } else if (v.userData.speed < 0 && v.position.x > 3.5 && v.position.x < 14) {
+            shouldStop = true;
+          }
+        }
+
+        if (!shouldStop) {
+          v.position.x += v.userData.speed * delta;
+        }
+
+        // 도로 경계 순환 (X: -45m ~ +45m)
+        if (v.position.x > 45) v.position.x = -45;
+        if (v.position.x < -45) v.position.x = 45;
+
+        // 플레이어와의 거리 측정
+        const dx = v.position.x - player.position.x;
+        const dz = v.position.z - player.position.z;
+        const distToPlayer = Math.sqrt(dx * dx + dz * dz);
+
+        // 경적(Horn) 소리: 플레이어가 차도에 있고 차량이 11m 이내로 접근 시 빵빵!
+        if (distToPlayer < 11.0 && !onSidewalk) {
+          soundEngine.playCarHorn();
+        }
+
+        // 충돌 검사 (차량 충돌 박스)
+        const hitRadius = (v.userData.type === 'motorcycle' ? 1.0 : 1.5);
+        if (distToPlayer < hitRadius && !onSidewalk) {
+          triggerCrashAlert();
+        }
+
+        // 멀어진 차량 청소
+        if (v.position.z - player.position.z > 50.0) {
+          scene.remove(v);
+          activeVehicles.splice(i, 1);
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    // 윈도우 리사이즈
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // 실행 시작
+    updateAllSignals(0);
+    resetToOrigin();
+    animate();
+  </script>
+</body>
+</html>
